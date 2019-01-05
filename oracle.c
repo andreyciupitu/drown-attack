@@ -264,7 +264,7 @@ void send_master_key_guess(SSL *s,
 int recv_server_verify(SSL *ssl)
 {
 	int result;
-	
+
 	// Receive message from server
 	ssl2_read_from_socket(ssl);
 
@@ -366,7 +366,7 @@ int main(int argc, char **argv)
 		return -1;
 	}
 
-	// TODO add master key guess here 
+	// TODO add master key guess here
 	// Needs encrypted key data in order to work
 
 	SSL_CTX_free(ssl->ctx);
