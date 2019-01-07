@@ -37,3 +37,5 @@ To build the executable from the source files use:
 The oracle requires a SSLv2 compliant input (encrypted key).
 The DROWN attack transforms the TLS PMS into an SSLv2 compliant ciphertext, however,
 for the purpose of this project, we have captured directly SSLv2 traffic.
+
+Password for the default key pair: DROWN
